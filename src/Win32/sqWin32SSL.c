@@ -500,7 +500,15 @@ sqInt sqConnectSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 
 	/* TODO: Look at retFlags */
 	ssl->state = SQSSL_CONNECTED;
-	sqCopyExtraData(ssl, ssl->sbdOut);
+	/* If there is SECBUFFER_EXTRA in the input we need to retain it */
+	if(ssl->inbuf[1].BufferType == SECBUFFER_EXTRA) {
+		int extra = ssl->inbuf[1].cbBuffer;
+		if(ssl->loglevel) printf("sqConnectSSL: Retaining %d token bytes\n", extra);
+		memmove(ssl->dataBuf, ssl->dataBuf + (ssl->dataLen - extra), extra);
+		ssl->dataLen = extra;
+	} else {
+		sqCopyExtraData(ssl, ssl->sbdOut);
+	}
     ret = QueryContextAttributes(&ssl->sslCtxt, SECPKG_ATTR_STREAM_SIZES, &ssl->sslSizes);
 	if(ssl->loglevel) printf("sqConnectSSL: Maximum message size is %d bytes\n", ssl->sslSizes.cbMaximumMessage);
 
