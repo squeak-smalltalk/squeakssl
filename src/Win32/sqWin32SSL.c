@@ -721,6 +721,12 @@ sqInt sqDecryptSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 	ssl->sbdIn.cBuffers = 4;
 	ret = DecryptMessage(&ssl->sslCtxt, &ssl->sbdIn, 0, 0);
 
+	if(ret == SEC_I_CONTEXT_EXPIRED) {
+		/* The remote has shut down the ssl session */
+		ssl->dataLen = 0;
+		return 0;
+	}
+
 	/* Copy the result into destination buffer */
 	total = 0;
 	for(i=0;i<4;i++) {
