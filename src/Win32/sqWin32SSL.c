@@ -471,6 +471,9 @@ sqInt sqConnectSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 		int count;
 		/* Handle various failure conditions */
 		switch(ret) {
+			case SEC_E_INCOMPLETE_MESSAGE:
+				/* not enough data for the handshake to complete */
+				return SQSSL_NEED_MORE_DATA;
 			case SEC_I_CONTINUE_NEEDED:
 				/* Send contents back to peer and come back with more data */
 				count = sqCopyDescToken(ssl, ssl->sbdOut, dstBuf, dstLen);
