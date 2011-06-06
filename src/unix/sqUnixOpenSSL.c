@@ -342,7 +342,7 @@ sqInt sqDecryptSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 	nbytes = SSL_read(ssl->ssl, dstBuf, dstLen);
 	if(nbytes <= 0) {
 	  int error = SSL_get_error(ssl->ssl, nbytes);
-	  if(error != SSL_ERROR_WANT_READ) {
+	  if(error != SSL_ERROR_WANT_READ && error != SSL_ERROR_ZERO_RETURN) {
 	    return SQSSL_GENERIC_ERROR;
 	  }
 	  nbytes = 0;
