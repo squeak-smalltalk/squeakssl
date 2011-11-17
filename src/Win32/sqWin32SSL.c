@@ -115,11 +115,15 @@ static sqInt sqCopyDescToken(sqSSL *ssl, SecBufferDesc sbd, char *dstBuf, sqInt 
 }
 
 /* Set up the local certificate for SSL */
+#define MAX_NAME_SIZE 4096
 static sqInt sqSetupCert(sqSSL *ssl, char *certName, int server) {
 	SCHANNEL_CRED sc_cred = { 0 };
 	SECURITY_STATUS ret;
 	HCERTSTORE hStore;
 	PCCERT_CONTEXT pContext = NULL;
+	DWORD dwPropSize;
+	WCHAR wFriendlyName[MAX_NAME_SIZE];
+	char  bFriendlyName[MAX_NAME_SIZE];
 
 	if(certName) {
 		hStore = CertOpenSystemStore(0, "MY");
@@ -127,12 +131,32 @@ static sqInt sqSetupCert(sqSSL *ssl, char *certName, int server) {
 			if(ssl->loglevel) printf("sqSetupCert: CertOpenSystemStore failed\n");
 			return 0;
 		}
-		pContext = CertFindCertificateInStore(hStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-											  0, CERT_FIND_SUBJECT_STR_A, certName, NULL);
+		pContext = NULL;
 
-		/* XXXX: Fail? Or just not provide the cert? For now, fail. */
+		/* Enumerate the certificate store to find the cert with the given friendly name */
+		while(pContext = CertEnumCertificatesInStore(hStore, pContext)) {
+			if(ssl->loglevel) printf("Checking certificate: ");
+			dwPropSize = MAX_NAME_SIZE * sizeof(WCHAR);
+			if(!CertGetCertificateContextProperty(pContext, CERT_FRIENDLY_NAME_PROP_ID, wFriendlyName, &dwPropSize)) {
+				if(ssl->loglevel) printf("<no friendly name>");
+				continue;
+			}
+			if(!WideCharToMultiByte(CP_UTF8, 0, wFriendlyName, -1, bFriendlyName, MAX_NAME_SIZE, NULL, NULL)) {
+				if(ssl->loglevel) printf("<utf-8 conversion failure>");
+				continue;
+			}
+			if(ssl->loglevel) printf("%s\n", bFriendlyName);
+			if(strcmp(certName, bFriendlyName) == 0) break;
+		}
+
+		if(pContext == 0) {
+			/* For compatibility with older versions of SqueakSSL, attempt to match against subject string */
+			pContext = CertFindCertificateInStore(hStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+												  0, CERT_FIND_SUBJECT_STR_A, certName, NULL);
+		}
+
 		if(!pContext) {
-			if(ssl->loglevel) printf("sqSetupCert: CertFindCertitficateInStore failed\n");
+			if(ssl->loglevel) printf("sqSetupCert: No suitable certificate  found\n");
 			CertCloseStore(hStore, 0);
 			return 0;
 		}
@@ -587,6 +611,9 @@ sqInt sqAcceptSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt 
 	if(ret != SEC_E_OK) {
 		/* Handle various failure conditions */
 		switch(ret) {
+			case SEC_E_INCOMPLETE_MESSAGE:
+				/* not enough data for the handshake to complete */
+				return SQSSL_NEED_MORE_DATA;
 			case SEC_I_CONTINUE_NEEDED:
 				/* Send contents back to peer and come back with more data */
 				return sqCopyDescToken(ssl, ssl->sbdOut, dstBuf, dstLen);
@@ -779,6 +806,48 @@ char* sqGetStringPropertySSL(sqInt handle, int propID) {
 	return NULL;
 }
 
+/* sqAddPfxCertToStore: Adds a PFX certificate to MY certificate store. 
+   Arguments:
+		pfxData - the contents of the PFX certificate file
+		pfxLen - the length of the PFX certificate file
+		passData - the utf8 encoded password for the file
+		passLen - the size of the password
+   Returns: 1 on success, 0 on failure
+*/
+static sqInt sqAddPfxCertToStore(char *pfxData, sqInt pfxLen, char *passData, sqInt passLen) {
+	PCCERT_CONTEXT pContext;
+	HCERTSTORE pfxStore, myStore;
+	CRYPT_DATA_BLOB blob;
+	WCHAR widePass[4096];
+
+	/* Verify that this is a PFX file */
+	blob.cbData = pfxLen;
+	blob.pbData = pfxData;
+	if(!PFXIsPFXBlob(&blob)) return 0; /* Not a PFX blob */
+
+	/* Verify that the password is all right */
+	widePass[0] = 0;
+	if(passLen > 0) {
+		DWORD wideLen = MultiByteToWideChar(CP_UTF8, 0, passData, passLen, widePass, 4095);
+		widePass[wideLen] = 0;
+	}
+	if(!PFXVerifyPassword(&blob, widePass, 0)) return 0; /* Invalid password */
+
+	/* Import the PFX blob into a temporary store */
+	pfxStore = PFXImportCertStore(&blob, widePass, 0);
+	if(!pfxStore) return 0;
+
+	/* And copy the certificates to MY store */
+	myStore = CertOpenSystemStore(0, "MY");
+	pContext = NULL;
+	while(pContext = CertEnumCertificatesInStore(pfxStore, pContext)) {
+		CertAddCertificateContextToStore(myStore, pContext, CERT_STORE_ADD_REPLACE_EXISTING, NULL);
+	}
+	CertCloseStore(myStore, 0);
+	CertCloseStore(pfxStore, 0);
+	return 1;
+}
+
 /* sqSetStringPropertySSL: Set a string property in SSL.
 	Arguments:
 		handle - the ssl handle
@@ -802,6 +871,9 @@ sqInt sqSetStringPropertySSL(sqInt handle, int propID, char *propName, sqInt pro
 
 	switch(propID) {
 		case SQSSL_PROP_CERTNAME: ssl->certName = property; break;
+		/* Platform specific: Adds a .PFX file to MY certificate store w/o password.
+		   Useful for installing the default test certificate in SqueakSSL. */
+		case 10001: return sqAddPfxCertToStore(propName, propLen, NULL, 0);
 		default: 
 			if(ssl->loglevel) printf("sqSetStringPropertySSL: Unknown property ID %d\n", propID);
 			return 0;
