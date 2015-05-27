@@ -3,6 +3,7 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+#include "openssl/x509v3.h"
 
 typedef struct sqSSL {
 	int state;
@@ -12,6 +13,7 @@ typedef struct sqSSL {
 	char *certName;
 	char *peerName;
 	char *serverName;
+	char *subjectAltNameDNS;
 
 	SSL_METHOD *method;
 	SSL_CTX *ctx;
@@ -48,9 +50,11 @@ sqInt sqSetupSSL(sqSSL *ssl, int server) {
 
 	/* Fixme. Needs to use specified version */
 	if(ssl->loglevel) printf("sqSetupSSL: setting method\n");
-	ssl->method = SSLv23_method();
+	ssl->method = (SSL_METHOD*)SSLv23_method();
 	if(ssl->loglevel) printf("sqSetupSSL: Creating context\n");
 	ssl->ctx = SSL_CTX_new(ssl->method);
+	if(ssl->loglevel) printf("sqSetupSSL: Disabling SSLv2 and SSLv3\n");
+	SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
 	if(!ssl->ctx) ERR_print_errors_fp(stdout);
 
@@ -136,10 +140,61 @@ sqInt sqDestroySSL(sqInt handle) {
 
 	if(ssl->certName) free(ssl->certName);
 	if(ssl->peerName) free(ssl->peerName);
+	if(ssl->serverName) free(ssl->serverName);
+	if(ssl->subjectAltNameDNS) free(ssl->subjectAltNameDNS);
 
 	free(ssl);
 	handleBuf[handle] = NULL;
 	return 1;
+}
+
+/* extractSubjectAltNameDNSFrom: Extract the DNS entries from the SubjectAltName extension of the certificate.
+   Return a string containing the DNS entries separated by commas, or NULL if there's none. */
+static char* extractSubjectAltNameDNSFrom(sqSSL* ssl, X509* cert) {
+	unsigned i, j;
+	unsigned san_name_count;
+	STACK_OF(GENERAL_NAME)* san_names;
+	GENERAL_NAME* san_name;
+	unsigned san_name_size;
+	unsigned result_size = 0;
+	char* result = NULL;
+
+	san_names = X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
+	if (!san_names) {
+		if (ssl->loglevel) printf("extractSubjectAltNameDNSFrom: No SAN names\n");
+		return result;
+	}
+	san_name_count = sk_GENERAL_NAME_num(san_names);
+	if (ssl->loglevel) printf("extractSubjectAltNameDNSFrom: There are %u SAN names\n", san_name_count); 
+	// Calculate the result_size
+	for (i = 0; i < san_name_count; ++i) {
+		san_name = sk_GENERAL_NAME_value(san_names, i);
+		if (san_name->type == GEN_DNS) {
+			result_size += ASN1_STRING_length(san_name->d.dNSName) + 1;
+			if (ssl->loglevel) printf("extractSubjectAltNameDNSFrom: Found a DNS SAN name. Result size became %u\n", result_size); 
+		}
+	}
+	if (!result_size) {
+		if (ssl->loglevel) printf("extractSubjectAltNameDNSFrom: No DNS SAN names\n"); 
+		sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
+		return result;
+	}
+	// Allocate and fill result
+	result = malloc(result_size);
+	j = 0;
+	for (i = 0; i < san_name_count; ++i) {
+		san_name = sk_GENERAL_NAME_value(san_names, i);
+		if (san_name->type == GEN_DNS) {
+			san_name_size = ASN1_STRING_length(san_name->d.dNSName);
+			strncpy(result + j, (char*)ASN1_STRING_data(san_name->d.dNSName), san_name_size);
+			j += san_name_size;
+			result[j++] = ',';
+		}
+	}
+	result[j - 1] = '\0'; // Overwrite the last comma
+	sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
+	if (ssl->loglevel) printf("extractSubjectAltNameDNSFrom: Extracted DNS SAN names: %s\n", result); 
+	return result;
 }
 
 /* sqConnectSSL: Start/continue an SSL client handshake.
@@ -217,7 +272,8 @@ sqInt sqConnectSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 					NID_commonName, peerName, 
 					sizeof(peerName));
 		if(ssl->loglevel) printf("sqConnectSSL: peerName = %s\n", peerName);
-		ssl->peerName = strdup(peerName);
+		ssl->peerName = strndup(peerName, sizeof(peerName) - 1);
+		ssl->subjectAltNameDNS = extractSubjectAltNameDNSFrom(ssl, cert);
 		X509_free(cert);
 
 		/* Check the result of verification */
@@ -301,7 +357,7 @@ sqInt sqAcceptSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt 
 					NID_commonName, peerName, 
 					sizeof(peerName));
 		if(ssl->loglevel) printf("sqAcceptSSL: peerName = %s\n", peerName);
-		ssl->peerName = strdup(peerName);
+		ssl->peerName = strndup(peerName, sizeof(peerName) - 1);
 		X509_free(cert);
 
 		/* Check the result of verification */
@@ -376,14 +432,14 @@ char* sqGetStringPropertySSL(sqInt handle, int propID) {
 
 	if(ssl == NULL) return NULL;
 	switch(propID) {
-		case SQSSL_PROP_PEERNAME:	return ssl->peerName;
-		case SQSSL_PROP_CERTNAME:	return ssl->certName;
-		case SQSSL_PROP_SERVERNAME:	return ssl->serverName;
+		case SQSSL_PROP_PEERNAME:		return ssl->peerName;
+		case SQSSL_PROP_CERTNAME:		return ssl->certName;
+		case SQSSL_PROP_SERVERNAME:		return ssl->serverName;
+		case SQSSL_PROP_SUBJECTALTNAMEDNS:	return ssl->subjectAltNameDNS;
 		default:
 			if(ssl->loglevel) printf("sqGetStringPropertySSL: Unknown property ID %d\n", propID);
 			return NULL;
 	}
-	return NULL;
 }
 
 /* sqSetStringPropertySSL: Set a string property in SSL.
@@ -400,13 +456,11 @@ sqInt sqSetStringPropertySSL(sqInt handle, int propID, char *propName, sqInt pro
 
 	if(ssl == NULL) return 0;
 
-	if(propLen) {
-		property = malloc(propLen + 1);
-		memcpy(property, propName, propLen);
-		property[propLen] = '\0';
+	if(propLen > 0) {
+		property = strndup(propName, propLen);
 	};
 
-	if(ssl->loglevel) printf("sqSetStringPropertySSL(%d): %s\n", propID, property);
+	if(ssl->loglevel) printf("sqSetStringPropertySSL(%d): %s\n", propID, property ? property : "(null)");
 
 	switch(propID) {
 		case SQSSL_PROP_CERTNAME:
