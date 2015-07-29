@@ -407,7 +407,7 @@ sqInt sqSetStringPropertySSL(sqInt handle, int propID, char *propName, sqInt pro
 		property = strndup(propName, propLen);
 	};
 
-	if(ssl->loglevel) printf("sqSetStringPropertySSL(%d): %s\n", propID, property);
+	if(ssl->loglevel) printf("sqSetStringPropertySSL(%d): %s\n", propID, property ? property : "(null)");
 
 	switch(propID) {
 		case SQSSL_PROP_CERTNAME:
@@ -420,10 +420,7 @@ sqInt sqSetStringPropertySSL(sqInt handle, int propID, char *propName, sqInt pro
 			break;
 		default:
 			if(property) free(property);
-			if(ssl->loglevel) {
-				printf("sqSetStringPropertySSL: Unknown property ID %d\n",
-					propID ? propID : "(null)");
-			}
+			if(ssl->loglevel) printf("sqSetStringPropertySSL: Unknown property ID %d\n", propID);
 			return 0;
 	}
 	return 1;
