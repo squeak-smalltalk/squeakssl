@@ -48,9 +48,11 @@ sqInt sqSetupSSL(sqSSL *ssl, int server) {
 
 	/* Fixme. Needs to use specified version */
 	if(ssl->loglevel) printf("sqSetupSSL: setting method\n");
-	ssl->method = SSLv23_method();
+	ssl->method = (SSL_METHOD*) SSLv23_method();
 	if(ssl->loglevel) printf("sqSetupSSL: Creating context\n");
 	ssl->ctx = SSL_CTX_new(ssl->method);
+	if(ssl->loglevel) printf("sqSetupSSL: Disabling SSLv2 and SSLv3\n");
+	SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
 	if(!ssl->ctx) ERR_print_errors_fp(stdout);
 
@@ -302,7 +304,7 @@ sqInt sqAcceptSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt 
 					NID_commonName, peerName, 
 					sizeof(peerName));
 		if(ssl->loglevel) printf("sqAcceptSSL: peerName = %s\n", peerName);
-		ssl->peerName = strdup(peerName);
+		ssl->peerName = strndup(peerName, sizeof(peerName) - 1);
 		X509_free(cert);
 
 		/* Check the result of verification */
@@ -384,7 +386,7 @@ char* sqGetStringPropertySSL(sqInt handle, int propID) {
 			if(ssl->loglevel) printf("sqGetStringPropertySSL: Unknown property ID %d\n", propID);
 			return NULL;
 	}
-	return NULL;
+	// unreachable
 }
 
 /* sqSetStringPropertySSL: Set a string property in SSL.
@@ -402,9 +404,7 @@ sqInt sqSetStringPropertySSL(sqInt handle, int propID, char *propName, sqInt pro
 	if(ssl == NULL) return 0;
 
 	if(propLen) {
-		property = malloc(propLen + 1);
-		memcpy(property, propName, propLen);
-		property[propLen] = '\0';
+		property = strndup(propName, propLen);
 	};
 
 	if(ssl->loglevel) printf("sqSetStringPropertySSL(%d): %s\n", propID, property);
@@ -420,7 +420,10 @@ sqInt sqSetStringPropertySSL(sqInt handle, int propID, char *propName, sqInt pro
 			break;
 		default:
 			if(property) free(property);
-			if(ssl->loglevel) printf("sqSetStringPropertySSL: Unknown property ID %d\n", propID);
+			if(ssl->loglevel) {
+				printf("sqSetStringPropertySSL: Unknown property ID %d\n",
+					propID ? propID : "(null)");
+			}
 			return 0;
 	}
 	return 1;
