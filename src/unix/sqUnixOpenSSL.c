@@ -160,7 +160,7 @@ sqInt sqConnectSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 	X509 *cert;
 	sqSSL *ssl = sslFromHandle(handle);
 
-	if(ssl->loglevel) printf("sqConnectSSL: %lx\n", (long)ssl);
+	if(ssl->loglevel) printf("sqConnectSSL: %p\n", ssl);
 
 	/* Verify state of session */
 	if(ssl == NULL || (ssl->state != SQSSL_UNUSED && ssl->state != SQSSL_CONNECTING)) {
@@ -213,7 +213,7 @@ sqInt sqConnectSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 
 	if(ssl->loglevel) printf("sqConnectSSL: SSL_get_peer_certificate\n");
 	cert = SSL_get_peer_certificate(ssl->ssl);
-	if(ssl->loglevel) printf("sqConnectSSL: cert = %lx\n", (long)cert);
+	if(ssl->loglevel) printf("sqConnectSSL: cert = %p\n", cert);
 	/* Fail if no cert received. */
 	if(cert) {
 		X509_NAME_get_text_by_NID(X509_get_subject_name(cert), 
@@ -297,7 +297,7 @@ sqInt sqAcceptSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt 
 
 	if(ssl->loglevel) printf("sqAcceptSSL: SSL_get_peer_certificate\n");
 	cert = SSL_get_peer_certificate(ssl->ssl);
-	if(ssl->loglevel) printf("sqAcceptSSL: cert = %lx\n", (long)cert);
+	if(ssl->loglevel) printf("sqAcceptSSL: cert = %p\n", cert);
 
 	if(cert) {
 		X509_NAME_get_text_by_NID(X509_get_subject_name(cert), 
