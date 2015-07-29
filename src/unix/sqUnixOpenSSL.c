@@ -136,6 +136,7 @@ sqInt sqDestroySSL(sqInt handle) {
 
 	if(ssl->certName) free(ssl->certName);
 	if(ssl->peerName) free(ssl->peerName);
+	if(ssl->serverName) free(ssl->serverName);
 
 	free(ssl);
 	handleBuf[handle] = NULL;
