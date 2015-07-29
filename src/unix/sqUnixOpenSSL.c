@@ -220,7 +220,7 @@ sqInt sqConnectSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt
 					NID_commonName, peerName, 
 					sizeof(peerName));
 		if(ssl->loglevel) printf("sqConnectSSL: peerName = %s\n", peerName);
-		ssl->peerName = strdup(peerName);
+		ssl->peerName = strndup(peerName, sizeof(peerName) - 1);
 		X509_free(cert);
 
 		/* Check the result of verification */
