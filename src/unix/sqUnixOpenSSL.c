@@ -339,7 +339,7 @@ sqInt sqDestroySSL(sqInt handle) {
 */
 sqInt sqConnectSSL(sqInt handle, char* srcBuf, sqInt srcLen, char *dstBuf, sqInt dstLen) {
 	int result, n;
-	char peerName[MAX_HOSTNAME_LENGTH + ];
+	char peerName[MAX_HOSTNAME_LENGTH + 1];
 	X509 *cert;
 	sqSSL *ssl = sslFromHandle(handle);
 
